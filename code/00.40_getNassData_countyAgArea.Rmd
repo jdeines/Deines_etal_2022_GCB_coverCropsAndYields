@@ -1,0 +1,97 @@
+---
+title: "Get NASS Cropland Area by County"
+author: "jill deines"
+date: "3/15/2022"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    keep_md: true
+---
+
+**Goal: Download county ag area from NASS quickstats api**
+
+Note: personal API key for NASS removed for publication. Keys can be obtained through https://quickstats.nass.usda.gov/api
+
+```{r knitrOpts, echo=FALSE}
+library(knitr)
+opts_chunk$set(cache=FALSE, eval = FALSE, fig.path='../figure/00.10_getNASS_plantingProgress/')
+```
+
+**R Packages Needed**
+
+```{r packages, message=FALSE, echo=TRUE, eval=TRUE, warning = FALSE}
+library(tidyverse) # dplyr, stringr, ggplot2..
+library(rnassqs)
+
+
+library(here)
+
+sessionInfo()
+```
+
+**Directories**
+
+
+```{r directories, eval = TRUE}
+projDir <- here::here()
+nassDir <- paste0(projDir,'/data_working/stateTrends_RS_nass/nass_countyAgArea')
+
+nassFileName_raw <- 'NASS_cornBelt6_countyAgArea_2020-2021_raw.csv'
+nassFileName_formatted <- 'NASS_cornBelt6_countyAgArea_2020-2021_formatted.csv'
+
+```
+
+# get data
+run 1x
+
+```{r getdata, eval = FALSE}
+nassqs_auth(key = 'EnterKeyHere')
+statesWanted <- c('IN','IL','IA','OH','MI','MO')
+#cropsWanted <- c('CORN','SOYBEANS')
+#short_desc_suffix <- ' - ACRES PLANTED'
+statisticcat_desc <- 'AREA PLANTED'
+
+# param list without state
+paramsNoState <- list("source_desc" = "SURVEY",
+                      "agg_level_desc" = 'COUNTY',
+                      "year__GE" = 2000)
+
+# split up by state to avoid query limits
+nasslist <- list()
+for(state in statesWanted){
+    params <- c(list("state_alpha" = state,
+                     "statisticcat_desc" = statisticcat_desc),
+                paramsNoState)
+    # retrieve county data by state
+    listName <- state
+    nasslist[[listName]] <- nassqs(params)
+}
+
+# convert list of data frames to 1 giant dataframe
+nass.df <- do.call("rbind",nasslist)
+
+write_csv(nass.df, paste0(nassDir,'/',nassFileName_raw))
+```
+
+
+# summarize data
+
+```{r summarize, eval = FALSE}
+nass <- read_csv(paste0(nassDir,'/',nassFileName_raw))
+
+# hack out extraneous columns
+nassLess <- nass %>% 
+  mutate(state_name = str_to_title(state_name),
+         fips5 = paste0(state_fips_code, county_code),
+         Nass_Area_acres = as.numeric(gsub(",","",Value)),
+         Nass_Area_m2 = Nass_Area_acres * 4046.86) %>%
+  filter(class_desc == 'ALL CLASSES',
+         !grepl('FOLLOWING',short_desc)) %>%
+  dplyr::select(c(fips5, year, state_alpha, state_name, county_code, class_desc, short_desc,
+                  statisticcat_desc, commodity_desc, contains('Nass')))
+
+# export
+write_csv(nassLess, paste0(nassDir, '/', nassFileName_formatted))
+
+```

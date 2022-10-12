@@ -1,0 +1,173 @@
+---
+title: 'Sample Locations'
+author: "Jill Deines"
+date: "2/18/2022"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    keep_md: true
+---
+
+**Goal: make study area map with NASS cover crop percentages**
+
+Notes:
+- county cover crop census data digitized from PDF by Qu and shared
+- script makes figure components for Figure 1, except 1c, which is in script 3.02
+
+
+```{r knitrOpts, echo=FALSE}
+library(knitr)
+opts_chunk$set(cache=FALSE, fig.path='../../figure/03.01_studyArea_mapNass/')
+```
+
+**R Packages Needed**
+
+```{r packages, message=FALSE, echo=TRUE, eval=TRUE, warning=FALSE}
+library(tidyverse)
+library(sf)
+library(sfheaders)
+library(patchwork)
+library(BAMMtools) # for jenks 
+
+library(here)
+
+sessionInfo()
+```
+
+# Directories
+
+```{r directories}
+# gis directory for state boundaries
+gisFolder <- paste0(here::here(),'/data/gis')
+states <- read_sf(paste0(gisFolder,'/States_continental.shp')) %>%
+  st_transform(5070) 
+
+
+# county NASS data
+countyShpName <- 'tl_2021_us_county_YesGreatLakes_clip12.shp'
+countyFile <- paste0(here::here(), '/data/stateTrends_RS_nass/2012_2017_NASS_Cover_Crop_Stats_countyFromQu.csv')
+
+countyFilter <- read_csv(paste0(here::here(), '/data/stateTrends_RS_nass/StudyAreaCountyList_CCmapPresence_gt5000.csv'))
+
+statesCodes = as.character(c(17,18, 19, 20, 26, 27, 29, 31, 38, 39, 46, 55))
+statesCodesLess = as.character(c(17,18, 19,  26, 27, 29,  39,  55))
+```
+
+
+# load and spatialize
+
+```{r load}
+
+nass0 <- read_csv(countyFile)
+nass <- nass0 %>%
+  mutate(percent2012 = `CoverCrop in 12 (arce)` / `Cropland in 12 (arce)` * 100,
+         percent2017 = `CoverCrop in 17 (acre)` / `Cropland in 17 (arce)` * 100,
+         percent2012 = case_when(!is.na(percent2012) ~ percent2012,
+                                 is.na(percent2012) ~ 0),
+         change = percent2017 - percent2012) %>%
+  dplyr::select(-contains('arce')) %>%
+  mutate(GEOID = as.character(FIPS))
+
+# county shape
+county_sf <- read_sf(paste0(gisFolder, '/', countyShpName)) %>%
+  st_transform(5070)
+
+county2 <- county_sf %>%
+  left_join(nass) %>%
+  filter(STATEFP %in% statesCodesLess)
+
+
+# state outlines
+statesStudy <- states %>%  filter(STATE_ABBR %in%  c('IA',"MO",'IL','IN','MI','OH'))
+states_spdf <- as(statesStudy, 'Spatial')
+statesPlot <- as(states, 'Spatial')
+
+# county filter - counties with CC map
+countyWithMap <- county2 %>% filter(GEOID %in% countyFilter$GEOID) 
+#plot(countyWithMap[1])
+
+# check
+studyBound <- countyWithMap %>% st_union() %>% sfheaders::sf_remove_holes()
+plot(studyBound[1])
+```
+
+
+# map
+
+```{r map_nassPercents2_small, fig.width = 6.75, fig.height = 4,dpi = 300,dev = c('png','pdf')}
+
+county2 <- county_sf %>%
+  left_join(nass) %>%
+  filter(STATEFP %in% statesCodesLess)
+
+countyLong <- county2 %>%
+  tidyr::gather(., key = variable, value = value, percent2012:percent2017)
+
+summary(countyLong$value)
+jenks <- getJenksBreaks(countyLong$value, 6)
+jenks
+modifiedJenks <- c(0,3,6,10,20)
+
+
+ggplot(countyLong) +
+  geom_sf(data = states) +
+  geom_sf(aes(fill = value), lwd = .1) +
+  geom_sf(data = states, fill = NA, color = 'gray10') +
+  geom_sf(data = studyBound, fill = NA, color = 'black', lwd = 1) +
+  scale_fill_fermenter(n.breaks = 5, palette = "YlGn", direction = 1,
+                       breaks = modifiedJenks) + #c(0, 1.2, 2.4, 3.4, 4.3,10)) +
+  coord_sf(xlim = c(-100000,1250000), ylim = c(1470000,2900000)) +
+ facet_wrap(~variable) +
+  theme_bw() + 
+  theme(strip.background = element_blank(),
+        strip.text = element_blank(),
+        legend.position = 'top')
+```
+
+just get a legend in the right colors for CC  map screenshot
+
+```{r map_nassPercents2_small_redLegend, fig.width = 6.75, fig.height = 4,dpi = 300,dev = c('png','pdf'), eval = FALSE}
+
+county2 <- county_sf %>%
+  left_join(nass) %>%
+  filter(STATEFP %in% statesCodesLess)
+
+countyLong <- county2 %>%
+  tidyr::gather(., key = variable, value = value, percent2012:percent2017)
+
+summary(countyLong$value)
+jenks <- getJenksBreaks(countyLong$value, 4)
+jenks
+modifiedJenks <- c(0,3,6)
+
+ggplot(countyLong) +
+  geom_sf(data = states) +
+  geom_sf(aes(fill = value), lwd = .1) +
+  geom_sf(data = states, fill = NA, color = 'gray10') +
+  geom_sf(data = statesStudy, fill = NA, color = 'black', lwd = 1) +
+  scale_fill_fermenter(n.breaks = 3, palette = "YlOrRd", direction = 1,
+                       breaks = modifiedJenks) + 
+  coord_sf(xlim = c(-100000,1250000), ylim = c(1470000,2900000)) +
+ facet_wrap(~variable) +
+  theme_bw() + 
+  theme(strip.background = element_blank(),
+        strip.text = element_blank(),
+        legend.position = 'top')
+```
+
+
+
+## state inset
+
+```{r stateinset, fig.width = 3, fig.height = 1.75, dpi = 300, dev = c('png','pdf')}
+
+plot(states[1], col = 'white', reset = FALSE, main = NA)
+plot(studyBound[1], col = 'cornflowerblue', add = TRUE)
+plot(states[1], col = NA, add = TRUE)
+
+plot(states[1], col = 'white', reset = FALSE, main = NA)
+plot(countyWithMap[1], col = 'cornflowerblue', border = NA,add = TRUE)
+plot(states[1], col = NA, add = TRUE)
+```
+

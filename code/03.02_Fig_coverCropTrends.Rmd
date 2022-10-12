@@ -1,0 +1,219 @@
+---
+title: "Cover Crop Trends - Figure"
+author: "Jill Deines"
+date: "1/28/2022"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    keep_md: true
+---
+
+**Goal: Look at cover crop trends over time from the RS dataset, along with NASS Census**
+
+
+Notes:
+- makes Figure 2 and Fig 1c
+- input data files exported from GEE in script users/jdeines/Lobell_coverCropII/00.10_formatCcMaps_getAreaByState
+- county level NASS data from Qu. counties in CC study from GEE script 00.20 
+
+
+```{r knitrOpts, echo=FALSE}
+library(knitr)
+opts_chunk$set(cache=FALSE, fig.path='../../figure/03.02_coverCropTrends/')
+```
+
+**R Packages Needed**
+
+```{r packages, message=FALSE, echo=TRUE, eval=TRUE}
+library(tidyverse)
+library(here)
+library(tidycensus)
+library(patchwork)
+
+sessionInfo()
+```
+
+**Directories**
+
+```{r setDirs}
+projDir <- here::here()
+dataDir <- paste0(projDir,'/data/stateTrends_RS_nass')
+
+# remote sensing tabulations
+outFile2 <- 'stateSummary_kaiyuV2_noAgMask_2000_2020.csv'
+
+# county NASS data - cover crop maps
+countyFile <- paste0(dataDir,'/2012_2017_NASS_Cover_Crop_Stats_countyFromQu.csv')
+countyFilter <- read_csv(paste0(dataDir,'/StudyAreaCountyList_CCmapPresence_gt5000.csv'))
+
+# county NASS data - ag area planted (compiled in 00.40 getNassData)
+nassA0_file <- paste0(dataDir,'/nass_countyAgArea/NASS_cornBelt6_countyAgArea_2020-2021_formatted.csv')
+
+studystates <- c('IA','IN', 'IL', 'OH', 'MO','MI')
+
+data(fips_codes)
+stateNames <- fips_codes %>%
+  dplyr::group_by(state_code) %>%
+  slice(1) %>% ungroup() %>%
+  dplyr::select(state, state_name, state_code) %>%
+  rename(STATE_ABBR = state)
+
+```
+
+
+# cc by state - Fig 1c
+
+```{r stateCheck}
+studystates2 <- c(studystates, 'WI','MN','SD')
+nass0 <- read_csv(countyFile)
+
+nass_check <- nass0 %>%
+  # conversions
+  mutate(totalAg_ha_2012 = `Cropland in 12 (arce)` / 2.471,
+         totalAg_ha_2017 = `Cropland in 17 (arce)` / 2.471,
+         coverCropped_ha_2012 = `CoverCrop in 12 (arce)` / 2.471,
+         coverCropped_ha_2017 = `CoverCrop in 17 (acre)` / 2.471,
+         state_code = substr(as.character(FIPS),1,2))  %>%
+  group_by(state_code) %>%
+  summarize(totalAg_ha_2012 = sum(totalAg_ha_2012, na.rm = TRUE),
+         totalAg_ha_2017 = sum(totalAg_ha_2017, na.rm = TRUE),
+         coverCropped_ha_2012 = sum(coverCropped_ha_2012, na.rm = TRUE),
+         coverCropped_ha_2017 = sum(coverCropped_ha_2017, na.rm = TRUE)) %>%
+  left_join(stateNames) %>%
+  filter(STATE_ABBR %in% studystates2) %>%
+  tidyr::gather(., key = variable, value = value, contains('20')) %>%
+  mutate(Year = as.integer(str_sub(variable, -4, -1)),
+         variable = str_sub(variable, 1, -6)) %>%
+  tidyr::spread(., key = variable, value = value) %>%
+  mutate(percentCoverCrop = coverCropped_ha/totalAg_ha * 100,
+         source = 'NASS') 
+
+
+# total cover crop fraction - study area only!
+nass_check %>%
+  filter(STATE_ABBR %in% studystates) %>%
+  group_by(Year) %>% 
+  summarize(coverCropped_ha = sum(coverCropped_ha),
+            totalAg_ha = sum(totalAg_ha)) %>%
+  mutate(percent = coverCropped_ha/totalAg_ha * 100)
+```
+
+## 2017 area plot - ms
+
+```{r Fig1c_2017NassBar, fig.width = 2.85, fig.height = 2.5, dpi = 300, dev = c('png','pdf')}
+nass_areaPlot <- nass_check %>% 
+  filter(Year == 2017 & STATE_ABBR != 'SD') %>%
+  mutate(inStudy = case_when(STATE_ABBR %in% c('WI','MN') ~ 0,
+                             !(STATE_ABBR %in% c('WI','MN')) ~ 1))
+
+ggplot(nass_areaPlot,
+       aes(y = coverCropped_ha/1000, x = reorder(STATE_ABBR, -coverCropped_ha), 
+           group = STATE_ABBR, fill = as.factor(inStudy))) +
+  geom_bar(stat = 'identity') +
+  scale_fill_manual(values = c('gray70','cornflowerblue')) +
+  ylab('Cover Crop Area (1000 ha)') + xlab('State') +
+  theme_bw() + theme(legend.position = 'none')
+```
+
+
+# Fig 2
+
+## load GEE and nass
+
+```{r loadData}
+
+# load/format NASS
+nass0 <- read_csv(countyFile)
+nass <- nass0 %>%
+  # filter by counties with CC map data
+  filter(FIPS %in% countyFilter$GEOID) %>%
+  # conversions
+  mutate(totalAg_ha_2012 = `Cropland in 12 (arce)` / 2.471,
+         totalAg_ha_2017 = `Cropland in 17 (arce)` / 2.471,
+         coverCropped_ha_2012 = `CoverCrop in 12 (arce)` / 2.471,
+         coverCropped_ha_2017 = `CoverCrop in 17 (acre)` / 2.471,
+         state_code = substr(as.character(FIPS),1,2))  %>%
+  group_by(state_code) %>%
+  summarize(totalAg_ha_2012 = sum(totalAg_ha_2012, na.rm = TRUE),
+         totalAg_ha_2017 = sum(totalAg_ha_2017, na.rm = TRUE),
+         coverCropped_ha_2012 = sum(coverCropped_ha_2012, na.rm = TRUE),
+         coverCropped_ha_2017 = sum(coverCropped_ha_2017, na.rm = TRUE)) %>%
+  left_join(stateNames) %>%
+  filter(STATE_ABBR %in% studystates) %>%
+  tidyr::gather(., key = variable, value = value, contains('20')) %>%
+  mutate(Year = as.integer(str_sub(variable, -4, -1)),
+         variable = str_sub(variable, 1, -6)) %>%
+  tidyr::spread(., key = variable, value = value) %>%
+  mutate(percentCoverCrop = coverCropped_ha/totalAg_ha * 100,
+         source = 'NASS')
+
+
+# recalculate percent with new NASS area
+
+# nass area - for unmasked percents (downloaded for work with Brian)
+nassA0 <- read_csv(nassA0_file) %>%
+  filter(fips5 %in% countyFilter$GEOID) %>%
+  group_by(year, state_alpha) %>%
+  summarize(Nass_Area_m2 = sum(Nass_Area_m2, na.rm = TRUE)) %>%
+  mutate(totalAg_ha_filter = Nass_Area_m2 / 10000) %>%
+  rename(STATE_ABBR = state_alpha,
+         Year = year) %>%
+  dplyr::select(c(STATE_ABBR, Year, totalAg_ha_filter)) %>%
+  ungroup()
+
+
+stateTotals_nassBase <- read_csv(paste0(dataDir, '/', outFile2)) %>%   
+  filter(STATE_ABBR %in% studystates) %>%
+  left_join(nassA0) %>%
+  mutate(percentCoverCrop = coverCropped_ha / totalAg_ha_filter * 100)
+
+```
+
+
+# Figures
+
+```{r Fig_manu, fig.width = 7, fig.height = 3.55, dpi = 300, dev = c('png','pdf')}
+stateLabels <- nass %>% group_by(state_name) %>% slice(1)
+
+p_area <- ggplot(stateTotals_nassBase  ,
+       aes(x = Year, y = coverCropped_ha/1000, group = STATE_ABBR)) +
+  geom_line() +
+      geom_text(data = stateLabels, x = 2001, y = 400, size = 3.5, color = 'black',
+                hjust = 'left',
+            aes(label = state_name)) +
+    geom_point(data = nass,
+               aes(x = Year, y = coverCropped_ha/1000), color = 'red') +
+  ylab('Area (1000 ha)') +
+      facet_wrap(~state_name, nrow = 1) +
+  theme_bw() + theme(strip.background = element_blank(),
+                     strip.text = element_blank(),
+                     axis.title.x = element_blank(),
+                    # axis.text.x = element_blank(),
+                    #panel.grid.major = element_blank(),
+                     panel.grid.minor = element_blank())
+
+
+p_percent <- ggplot(stateTotals_nassBase,
+       aes(x = Year, y = percentCoverCrop, group = STATE_ABBR)) +
+  geom_line() +
+  geom_text(data = stateLabels, x = 2001, y = 14.5, size = 3.5, color = 'black',
+                hjust = 'left',
+            aes(label = state_name)) +
+  geom_point(data = nass ,
+             aes(x = Year, y = percentCoverCrop), color = 'red') +
+  ylab('% of Total Area Planted') +
+  facet_wrap(~state_name, nrow = 1) +
+  theme_bw() + theme(strip.background = element_blank(),
+                     strip.text = element_blank(),
+                    #axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+                    #panel.grid.major = element_blank(),
+                     panel.grid.minor = element_blank())
+
+
+
+
+p_area /p_percent &
+    scale_x_discrete(limits = c( 2000,2005, 2010,2015,2020),
+                   labels = c('','2005','','2015','')) 
+```

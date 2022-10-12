@@ -1,0 +1,155 @@
+---
+title: 'Covariates Figure - Soy'
+author: "Jill Deines"
+date: "2/3/2022"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    keep_md: true
+---
+
+Goal: covariates figures based on cates. soy
+
+```{r knitrOpts, echo=FALSE}
+library(knitr)
+opts_chunk$set(cache=FALSE, fig.path='../../figure/03.30_covariates_soy/')
+```
+
+**R Packages Needed**
+
+```{r packages, message=FALSE, echo=TRUE, eval=TRUE, warning=FALSE}
+library(tidyverse)
+library(ggbiplot)
+library(grf)
+
+library(here)
+
+sessionInfo()
+```
+
+# Directories
+
+```{r directories}
+# scratch folder for model rdata objects
+scratchFolder <- '/Users/deinesji/Dropbox/2Stanford/projects/2021_coverCrops/data/causalForests/20220127_scratch_6state_SOY_v04_log_lessVars'
+
+
+```
+
+
+# load model results
+and calculate treatment effects as a percent of average yields
+
+```{r loadModel}
+# dataset
+overlap <- readRDS(paste0(scratchFolder, '/overlap.rds'))
+
+
+
+Y_hat <- readRDS(paste0(scratchFolder, '/Y_hat.rds'))
+cf <- readRDS(paste0(scratchFolder, '/cf_clusters_xc1.rds'))
+varImp <- readRDS(paste0(scratchFolder, '/cf_clusters_xc1_varImp.rds'))
+
+# process results ------------------------------
+# add predicted treatment effects to data 
+constOob_predict <- predict(cf)
+
+# add hats to original data frame
+overlapW0 <- overlap %>%
+  bind_cols(data.frame(Y_hat = Y_hat))
+
+colVars <- varImp %>% dplyr::pull(variable)
+
+overlapW <- overlapW0 %>%
+    mutate_at(colVars, list(Q4 = ~ntile(., 4),
+                           Q5 = ~ntile(., 5)))
+
+overlapTau <- overlapW %>%
+  bind_cols(constOob_predict) 
+
+ate_cf_aipw = average_treatment_effect(cf)
+ate_cf_aipw = average_treatment_effect(cf)
+tauhat_rf_aipw = c(ATE=ate_cf_aipw["estimate"],
+                   lower_ci=ate_cf_aipw["estimate"] - 1.96 * ate_cf_aipw["std.err"],
+                   upper_ci=ate_cf_aipw["estimate"] + 1.96 * ate_cf_aipw["std.err"])
+tauhat_rf_aipw
+
+# as a percentage of yield
+meanYield <- mean(overlapTau$Y)
+meanYield
+tauhat_rf_aipw_percent <- (exp(tauhat_rf_aipw) -1) * 100
+tauhat_rf_aipw_percent
+
+# sampled in analysis
+nrow(overlapTau)
+
+
+
+
+variables <- varImp$variable
+variables
+
+var2 <- c(variables[1:6])
+
+
+overlapTau_1 <- overlapTau %>%
+   mutate(cate_ntile = ntile(predictions, 3),
+          cate_binNames = case_when(cate_ntile == 1 ~ 'High',
+                                    cate_ntile ==2 ~ 'Medium',
+                                    cate_ntile==3 ~ 'Mild')) %>%
+  tidyr::drop_na() 
+
+
+
+```
+
+# boxplots
+
+```{r boxplot, fig.width = 3, fig.height = 4, dpi = 300, dev = c('png','pdf')}
+varRenamer <- data.frame(variable = var2,
+         var2 = c('June Tmax (C)','June VPD (kPa)','Aug Precip (mm)',
+                                  'Soil PAWS (mm)', 'Soil Quality', 'April Precip (mm)'),
+         stringsAsFactors = FALSE) 
+
+hte_df <- overlapTau_1 %>%
+  dplyr::select(c(uniqueID, year, predictions, cate_ntile, cate_binNames,  all_of(var2))) %>%
+  tidyr::gather(., key = variable, value = value, all_of(var2)) %>%
+  mutate(as.factor(cate_binNames = as.factor(cate_binNames))) %>%
+  left_join(varRenamer)
+
+# plot distribution of covariates by cate bins
+ggplot(hte_df,
+       aes(x = cate_binNames, y = value, group = cate_binNames, fill = cate_binNames)) +
+  geom_boxplot() + 
+  scale_fill_manual(values = c('#8c510a','#d8b365','#f6e8c3'))+
+  facet_wrap(~var2, scales = 'free_y', nrow = 3) +
+  xlab('Impact Tercile') + ylab('Value') +
+  theme_bw() + theme(legend.position = 'none',
+                     legend.title = element_blank(),
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank()) 
+```
+
+# pca
+
+```{r pca_biBin, fig.width = 3.25, fig.height = 5, dpi = 300, dev = c('png','pdf')}
+pcaBi <- overlapTau_1 %>%   filter(cate_ntile != 2) 
+
+
+pca <- prcomp(pcaBi %>% dplyr::select(all_of(var2)),
+                        center = TRUE, scale. = TRUE)
+
+
+ggbiplot(pca, groups = as.factor(pcaBi$cate_binNames), alpha=0.02, ellipse=TRUE) +
+    scale_color_manual(values = c('#8c510a','#dfc27d')) +
+  ylab('PCA Component 2') + xlab('PCA Component 1') +
+  ylim(c(-2.5,3)) + xlim(-2.5, 2.5) +
+  coord_equal() +
+  theme_bw() +theme(legend.position = 'none',
+                     panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank())
+
+
+
+```

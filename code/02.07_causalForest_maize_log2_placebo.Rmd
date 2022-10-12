@@ -1,0 +1,239 @@
+---
+title: "causalForest - log maize yields placebo test"
+author: "Jill Deines"
+date: "8/6/2022"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    keep_md: true
+---
+
+**Goal: run causal forest with mean 2001-2010 yields, as a placebo test of the method**
+
+Notes/Updates
+
+* log scale
+* reduced variables
+
+**note for published repository:**
+data provided in this repository have had latitude/longitude removed to preserve data privacy; since latitude and longitude were used as variables in the published analysis, this code will not reproduce the results exactly.
+
+publication output is included as data files for use in scripts to recreate the results figures with the official analysis output. see scripts 3.05-03.35.
+
+
+This also pulls in output from the main maize causal forests, which is not supplied here since that result depends on/includes lat lon.
+
+```{r knitrOpts, echo=FALSE}
+library(knitr)
+opts_chunk$set(cache=FALSE, fig.path='../../figure/02.07_causalForest_maize_log2_placebo/')
+```
+
+**R Packages Needed**
+
+```{r packages, message= F, echo = T, eval = T}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(tidyverse)
+library(grf)
+library(RColorBrewer)
+library(earth)
+library(corrplot)
+library(car)
+library(aod)
+library(sf)
+library(Rcpp)
+
+library(here)
+
+
+sessionInfo()
+```
+
+**Directories**
+
+```{r setDirs}
+# input/cleaned data folder
+projDir <- here::here()
+dataDir <- paste0(projDir,'/data/cleanedPointSample')
+dataFile <- 'pointSample_kaiyuV2_20220127_maize_placeboYields_latLonRemoved.csv'
+
+# scratch folder for model rdata objects
+scratchFolderMain <- '/Users/deinesji/Dropbox/2Stanford/projects/2021_coverCrops/data/causalForests/20220201_scratch_6state_maize_v04_log_lessVars'
+scratchFolder <- '/Users/deinesji/Dropbox/2Stanford/projects/2021_coverCrops/data/causalForests/20220201_scratch_6state_maize_v04_log_lessVars_placebo'
+
+# make scratch folder if necessary
+dir.create(file.path(scratchFolder), showWarnings = FALSE)
+```
+
+# Load and clean
+load master dataset created in masterDatasetCausalFOrest.rmd, with yields replaced with the 2001-2010 mean
+
+```{r load}
+
+CoverCropYearsAll_placebo <- read_csv(paste0(dataDir, '/', dataFile))
+```
+
+
+# Causal Forest
+
+
+## causal forest
+
+### filter dataset by overlap in original test
+
+```{r getOverlap}
+overlap <- readRDS(paste0(scratchFolderMain, '/overlap.rds'))
+
+placeboOverlap <- CoverCropYearsAll_placebo %>%
+  left_join(overlap %>% dplyr::select(uniqueID, w_hat)) %>%
+  filter(uniqueID %in% overlap$uniqueID) %>%
+  filter(!is.na(yield_tha))
+
+# y_hat and reduce to correct dataset
+Y_hat_main <- readRDS(paste0(scratchFolderMain, '/Y_hat.rds'))
+overlap$Y_hat <- Y_hat_main
+Y_hat <- overlap %>%
+  filter(uniqueID %in% placeboOverlap$uniqueID) %>%
+  pull(Y_hat)
+```
+
+```{r causal, eval = FALSE}
+
+# reload mars variables
+marsAll <- readRDS(paste0(scratchFolderMain, '/mars_c1.rds'))
+ev <- evimp(marsAll) # estimate variable importance
+envvars <- rownames(ev)
+
+# treatment
+W <- placeboOverlap %>% dplyr::pull(W)
+w_hat <- placeboOverlap$w_hat
+
+# outcome
+Y <- placeboOverlap %>% dplyr::pull(Y)
+
+# make covariate list; 
+# add in important propensity variables
+varsToKeep_main = c(envvars, 'year', 'slope')
+
+Xmain <- placeboOverlap %>%
+  dplyr::select(all_of(varsToKeep_main) )
+
+cf <- grf::causal_forest(Xmain, Y, W, Y_hat, w_hat, num.trees = 2000)
+
+varImpMain <- cf %>% 
+  variable_importance() %>% 
+  as.data.frame() %>% 
+  mutate(variable = colnames(cf$X.orig)) %>% 
+  arrange(desc(V1))
+varImpMain
+
+saveRDS(cf, paste0(scratchFolder, '/cf_clusters_xc1.rds'))
+saveRDS(varImpMain, paste0(scratchFolder, '/cf_clusters_xc1_varImp.rds'))
+```
+
+
+# Checking things out
+
+reload and extract model outputs
+
+```{r reload}
+# data used - placeboOverlap
+
+
+# propensity model results
+W_hat <- placeboOverlap %>% dplyr::pull(w_hat)
+
+# causal forest
+cf <- readRDS(paste0(scratchFolder, '/cf_clusters_xc1.rds'))
+varImp <- readRDS(paste0(scratchFolder, '/cf_clusters_xc1_varImp.rds'))
+
+
+W <- placeboOverlap %>% dplyr::pull(W)
+Y <- placeboOverlap %>% dplyr::pull(Y)
+
+
+# process results ------------------------------
+# add predicted treatment effects to data 
+constOob_predict <- predict(cf)
+
+# add hats to original data frame
+placeboOverlapW0 <- placeboOverlap %>%
+  bind_cols(data.frame(Y_hat = Y_hat))
+
+
+colVars <- varImp %>% dplyr::pull(variable)
+
+placeboOverlapW <- placeboOverlapW0 %>%
+  mutate_at(colVars, list(Q4 = ~ntile(., 4),
+                          Q5 = ~ntile(., 5)))
+
+overlapTau <- placeboOverlapW %>%
+  bind_cols(constOob_predict) 
+```
+
+## Average treatment Effects
+
+```{r ate}
+varImp
+
+ate_cf_aipw = average_treatment_effect(cf)
+ate_cf_aipw = average_treatment_effect(cf)
+tauhat_rf_aipw = c(ATE=ate_cf_aipw["estimate"],
+                   lower_ci=ate_cf_aipw["estimate"] - 1.96 * ate_cf_aipw["std.err"],
+                   upper_ci=ate_cf_aipw["estimate"] + 1.96 * ate_cf_aipw["std.err"])
+
+tauhat_rf_aipw
+
+ggplot(overlapTau,
+       aes(x = predictions)) +
+  geom_histogram() +
+  #xlim(-.2,.05)+
+  xlab('CATE (log t/ha)') +
+  geom_vline(xintercept = 0, col = 'black', linetype = 'dashed') +
+  geom_vline(xintercept = ate_cf_aipw["estimate"], col = 'red') +
+  theme_bw()
+
+```
+
+cate by percent
+
+```{r cate_percent}
+
+tauhat_rf_aipw_percent <- (exp(tauhat_rf_aipw) -1) * 100
+tauhat_rf_aipw_percent
+
+cate_percent <-  overlapTau %>%
+  mutate(tauPercents =  (exp(predictions) -1) * 100,) 
+
+ggplot(cate_percent,
+       aes(x = tauPercents)) +
+  geom_histogram() +
+  #xlim(-13,2.5)+
+  xlab('CATE (% of mean log yield)') +
+  geom_vline(xintercept = 0, col = 'black', linetype = 'dashed') +
+  geom_vline(xintercept = tauhat_rf_aipw_percent['ATE.estimate'], col = 'red') +
+  theme_bw()
+
+ggplot(cate_percent,
+       aes(x = tauPercents)) +
+  geom_histogram() +
+  #xlim(-13,2.5)+
+  xlab('CATE (% of mean yield)') +
+  geom_vline(xintercept = 0, col = 'black', linetype = 'dashed') +
+  geom_vline(xintercept = tauhat_rf_aipw_percent['ATE.estimate'], col = 'red') +
+  theme_bw()+
+  facet_wrap(~state)
+
+ggplot(cate_percent,
+       aes(x = tauPercents)) +
+  geom_histogram() +
+ # xlim(-13,2.5)+
+  xlab('CATE (% of mean yield)') +
+  geom_vline(xintercept = 0, col = 'black', linetype = 'dashed') +
+  geom_vline(xintercept = tauhat_rf_aipw_percent['ATE.estimate'], col = 'red') +
+  theme_bw()+
+  facet_wrap(~year)
+```
+

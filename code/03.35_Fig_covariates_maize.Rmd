@@ -11,6 +11,14 @@ output:
 
 Goal: covariates figures based on cates. maize
 
+**note for published repository:**
+data provided in this repository have had latitude/longitude removed to preserve data privacy
+
+this script retains the code to translate the output data (with lat lon) to the figure input data, but loads the pre-processed data with lat/lon removed. Code chunks that process the data are set to EVAl = false. 
+
+**Extra Note:**
+When generating the csv of CATE values in the "load model results" chunk for this repo, we were unable to run the predict and average_treatment_effect functions on our causal forests object with grf v 2.0 and greater. Original code was with grf 0.10.2, which is now included with this repo
+
 ```{r knitrOpts, echo=FALSE}
 library(knitr)
 opts_chunk$set(cache=FALSE, fig.path='../../figure/03.35_covariates_maize/')
@@ -20,6 +28,10 @@ opts_chunk$set(cache=FALSE, fig.path='../../figure/03.35_covariates_maize/')
 
 ```{r packages, message=FALSE, echo=TRUE, eval=TRUE, warning=FALSE}
 library(tidyverse)
+
+#library(devtools)
+#install_github("vqv/ggbiplot")
+
 library(ggbiplot)
 library(grf)
 
@@ -34,17 +46,21 @@ sessionInfo()
 # scratch folder for model rdata objects
 scratchFolder <- '/Users/deinesji/Dropbox/2Stanford/projects/2021_coverCrops/data/causalForests/20220201_scratch_6state_maize_v04_log_lessVars'
 
-
+# de-localized CATE output
+projDir <- here::here()
+dataDir <- paste0(projDir,'/data/cleanedPointSample')
+cateFile <- 'causalForestsOutput_maize_cates_covariables.csv'
 ```
 
 # load model results
 and calculate treatment effects as a percent of average yields
 
-```{r loadModel}
+## process from causal forest output
+not run here; synthesis file loaded below
+
+```{r loadModel, eval = FALSE}
 # dataset
 overlap <- readRDS(paste0(scratchFolder, '/overlap.rds'))
-
-
 
 Y_hat <- readRDS(paste0(scratchFolder, '/Y_hat.rds'))
 cf <- readRDS(paste0(scratchFolder, '/cf_clusters_xc1.rds'))
@@ -106,6 +122,13 @@ overlapTau_1 <- overlapTau %>%
 # boxplots
 
 ```{r boxplot, fig.width = 3, fig.height = 4, dpi = 300, dev = c('png','pdf')}
+# load data - location removed
+overlapTau_1 <- read_csv(paste0(dataDir, '/', cateFile))
+
+# top 6 important variables
+varImp <- readRDS(paste0(dataDir, '/', 'cf_clusters_xc1_varImp_maize.rds'))
+var2 <-   varImp$variable[1:6]
+  
 varRenamer <- data.frame(variable = var2,
          var2 = c('Soil Quality','July Tmax (C)','April Precip (mm)',
                                   "Solar Rad (MJ/m^2)", 'Apr Soil Moist (mm)', 'July VPD (kPa)'),
@@ -114,7 +137,7 @@ varRenamer <- data.frame(variable = var2,
 hte_df <- overlapTau_1 %>%
   dplyr::select(c(uniqueID, year, predictions, cate_ntile, cate_binNames,  all_of(var2))) %>%
   tidyr::gather(., key = variable, value = value, all_of(var2)) %>%
-  mutate(as.factor(cate_binNames = as.factor(cate_binNames))) %>%
+  mutate(cate_binNames = as.factor(cate_binNames)) %>%
   left_join(varRenamer)
 
 # plot distribution of covariates by cate bins

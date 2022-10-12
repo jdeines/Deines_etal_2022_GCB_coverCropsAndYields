@@ -11,6 +11,15 @@ output:
 
 Goal: covariates figures based on cates. soy
 
+
+**note for published repository:**
+data provided in this repository have had latitude/longitude removed to preserve data privacy
+
+this script retains the code to translate the output data (with lat lon) to the figure input data, but loads the pre-processed data with lat/lon removed. Code chunks that process the data are set to EVAl = false. 
+
+**Extra Note:**
+When generating the csv of CATE values in the "load model results" chunk for this repo, we were unable to run the predict and average_treatment_effect functions on our causal forests object with grf v 2.0 and greater. Original code was with grf 0.10.2, which is now included with this repo
+
 ```{r knitrOpts, echo=FALSE}
 library(knitr)
 opts_chunk$set(cache=FALSE, fig.path='../../figure/03.30_covariates_soy/')
@@ -20,6 +29,10 @@ opts_chunk$set(cache=FALSE, fig.path='../../figure/03.30_covariates_soy/')
 
 ```{r packages, message=FALSE, echo=TRUE, eval=TRUE, warning=FALSE}
 library(tidyverse)
+
+#library(devtools)
+#install_github("vqv/ggbiplot")
+
 library(ggbiplot)
 library(grf)
 
@@ -34,14 +47,20 @@ sessionInfo()
 # scratch folder for model rdata objects
 scratchFolder <- '/Users/deinesji/Dropbox/2Stanford/projects/2021_coverCrops/data/causalForests/20220127_scratch_6state_SOY_v04_log_lessVars'
 
-
+# de-localized CATE output
+projDir <- here::here()
+dataDir <- paste0(projDir,'/data/cleanedPointSample')
+cateFile <- 'causalForestsOutput_soybeans_cates_covariables.csv'
 ```
 
 
 # load model results
 and calculate treatment effects as a percent of average yields
 
-```{r loadModel}
+## process from causal forest output
+not run here; synthesis file loaded below
+
+```{r loadModel, eval = FALSE}
 # dataset
 overlap <- readRDS(paste0(scratchFolder, '/overlap.rds'))
 
@@ -107,6 +126,16 @@ overlapTau_1 <- overlapTau %>%
 # boxplots
 
 ```{r boxplot, fig.width = 3, fig.height = 4, dpi = 300, dev = c('png','pdf')}
+
+# load data - location removed
+overlapTau_1 <- read_csv(paste0(dataDir, '/', cateFile))
+
+# top 6 important variables
+varImp <- readRDS(paste0(dataDir, '/', 'cf_clusters_xc1_varImp_soybeans.rds'))
+var2 <-   varImp$variable[1:6]
+
+
+
 varRenamer <- data.frame(variable = var2,
          var2 = c('June Tmax (C)','June VPD (kPa)','Aug Precip (mm)',
                                   'Soil PAWS (mm)', 'Soil Quality', 'April Precip (mm)'),

@@ -1,6 +1,8 @@
 # Deines, Guan, Lopez, Zhou, White, Wang, and Lobell 2022, Global Change Biology
 ## Derived data and analysis code
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.7199708.svg)](https://doi.org/10.5281/zenodo.7199708)
+
 14 October 2022  
 Code by: Jillian Deines, with contributions from Cambria White and Bruno Lopez  
 Contact: jillian.deines@gmail.com  

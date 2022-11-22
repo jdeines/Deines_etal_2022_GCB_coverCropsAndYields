@@ -7,7 +7,7 @@ Contact: jillian.deines@gmail.com
 
 This codebase accompanies the paper:
 
-Deines, JM, K. Guan, B. Lopez, Q. Zhou, C. White, S. Wang, and D.B. Lobell. 2022. Recent cover crop adoption is associated with small maize and yield losses in the United States. Global Change Biology, https://doi.org/.....
+Deines, JM, K. Guan, B. Lopez, Q. Zhou, C. White, S. Wang, and D.B. Lobell. 2022. Recent cover crop adoption is associated with small maize and yield losses in the United States. Global Change Biology, https://doi.org/10.1111/gcb.16489
 
 ## Contents and Subfolders
 
